@@ -6,32 +6,41 @@ import (
 )
 
 type TaskManager struct {
-	Tasks map[string]*Task
-	Active int
-	MaxActive int
+	tasks map[string]*Task
+	active int
+	maxActive int
 	mu sync.Mutex
+}
+
+//NOTE OOP incapsulation pattern
+// Exported TaskManager constructor for the other packages
+func NewTaskManager(max int) *TaskManager {
+	return &TaskManager{
+		tasks: make(map[string]*Task),
+		maxActive: max,
+	}
 }
 
 func (m *TaskManager) CreateTask(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.Active >= m.MaxActive {
+	if m.active >= m.maxActive {
 		return errors.New("server busy: max active tasks reached")
 	}
 
-	m.Tasks[id] = &Task{
+	m.tasks[id] = &Task{
 		ID: id,
 		Status: StatusInProgress,
 		Files: []FileResult{},
 	}
-	m.Active++
+	m.active++
 	return nil
 }
 
 func (m *TaskManager) GetTask(id string) (*Task, error) {
  m.mu.Lock()
-	task, ok := m.Tasks[id]
+	task, ok := m.tasks[id]
 	m.mu.Unlock()
 
 	if !ok {
