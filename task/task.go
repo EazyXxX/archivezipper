@@ -21,5 +21,9 @@ type Task struct {
 	Status TaskStatus
 	Files []FileResult
 	ArchiveURL string
-	mu sync.Mutex
+	Mu sync.Mutex
+}
+
+func (m* TaskManager) processTaskArchive(task *Task) {
+	//WIP
 }

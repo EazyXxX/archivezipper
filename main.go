@@ -1,6 +1,14 @@
 package gotesttask
 
-import "archivezipper/task"
+import (
+	"archivezipper/handlers"
+	"archivezipper/task"
+)
 
+func main() {	
+	var taskManager = task.NewTaskManager(3)
+	
+	//NOTE Dependency injection
+	handlers.Init(taskManager)
 
-var taskManager = task.NewTaskManager(3)
+}

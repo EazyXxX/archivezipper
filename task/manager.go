@@ -2,6 +2,7 @@ package task
 
 import (
 	"errors"
+	"strings"
 	"sync"
 )
 
@@ -47,4 +48,39 @@ func (m *TaskManager) GetTask(id string) (*Task, error) {
 		return nil, errors.New("task not found")
 	}
 	return task, nil
+}
+
+func (m *TaskManager) AddFileToTask(taskID, url string) error {
+	m.mu.Lock()
+	task, ok := m.tasks[taskID]
+	m.mu.Unlock()
+
+	if !ok {
+		return errors.New("task not found")
+	}
+
+	task.Mu.Lock()
+	defer task.Mu.Unlock()
+
+	//Less then 3 files check
+	if len(task.Files) >= 3 {
+		return errors.New("max files per task reached")
+	}
+
+	//Extension check
+	if !(strings.HasSuffix(url, ".pdf") || strings.HasSuffix(url, ".jpeg")) {
+		return errors.New("unsupported file type")
+	}
+
+	task.Files = append(task.Files, FileResult{
+		URL: 				url,
+		Success: false,
+	})
+
+	//Archivation by a separate goroutine
+	if len(task.Files) == 3 {
+		go m.processTaskArchive(task)
+	}
+
+	return nil
 }
