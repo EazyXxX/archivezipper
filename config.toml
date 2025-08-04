@@ -1,0 +1,8 @@
+[server]
+port = "8080"
+
+[task]
+max_concurrent = 3
+
+[shutdown]
+delay = "5s"
