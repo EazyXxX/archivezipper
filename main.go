@@ -39,7 +39,9 @@ func main() {
 	r.HandleFunc("/tasks", handlers.CreateTaskHandler).Methods("POST")
 	r.HandleFunc("/tasks/{id}", handlers.GetTaskHandler).Methods("GET")
 	r.HandleFunc("/tasks/{id}/files", handlers.AddFileHandler).Methods("POST")
-	r.HandleFunc("/tasks/{id}/archive", handlers.DownloadArchiveHandler).Methods("GET")
+
+	//Private endpoint for archive loading (used only for task status URL)
+  r.HandleFunc("/tasks/{id}/archive", handlers.DownloadArchiveHandler).Methods("GET")
 
 //HTTP server initialization
 srv := &http.Server{
@@ -69,6 +71,8 @@ defer cancel()
 if err := srv.Shutdown(ctx); err != nil {
 	log.Printf("Server shutdown error: %v", err)
 }
+
+taskManager.Shutdown(ctx)
 
 log.Println("Server stopped")
 }

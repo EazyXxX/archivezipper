@@ -1,23 +1,23 @@
 package task
 
 import (
+	"context"
 	"errors"
-	"strings"
+	"log"
 	"sync"
+	"time"
 )
 
 type TaskManager struct {
-	tasks map[string]*Task
-	active int
+	tasks     map[string]*Task
+	active    int
 	maxActive int
-	mu sync.Mutex
+	mu        sync.Mutex
 }
 
-//NOTE OOP incapsulation pattern
-// Exported TaskManager constructor for the other packages
 func NewTaskManager(max int) *TaskManager {
 	return &TaskManager{
-		tasks: make(map[string]*Task),
+		tasks:     make(map[string]*Task),
 		maxActive: max,
 	}
 }
@@ -31,19 +31,19 @@ func (m *TaskManager) CreateTask(id string) error {
 	}
 
 	m.tasks[id] = &Task{
-		ID: id,
-		Status: StatusInProgress,
-		Files: []FileResult{},
+		id:     id,
+		status: StatusInProgress,
+		files:  []FileResult{},
 	}
 	m.active++
 	return nil
 }
 
 func (m *TaskManager) GetTask(id string) (*Task, error) {
- m.mu.Lock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
 	task, ok := m.tasks[id]
-	m.mu.Unlock()
-
 	if !ok {
 		return nil, errors.New("task not found")
 	}
@@ -59,28 +59,55 @@ func (m *TaskManager) AddFileToTask(taskID, url string) error {
 		return errors.New("task not found")
 	}
 
-	task.Mu.Lock()
-	defer task.Mu.Unlock()
+	task.mu.Lock()
+	defer task.mu.Unlock()
 
-	//Less then 3 files check
-	if len(task.Files) >= 3 {
+	//Max file count check
+	if len(task.files) >= 3 {
 		return errors.New("max files per task reached")
 	}
 
-	//Extension check
-	if !(strings.HasSuffix(url, ".pdf") || strings.HasSuffix(url, ".jpeg") || strings.HasSuffix(url, ".jpg")) {
+	//File extension check
+	if !isAllowedExtension(url) {
 		return errors.New("unsupported file type")
 	}
 
-	task.Files = append(task.Files, FileResult{
-		URL: 				url,
+	//Adding a file
+	task.files = append(task.files, FileResult{
+		URL:     url,
 		Success: false,
 	})
 
-	//Archivation by a separate goroutine
-	if len(task.Files) == 3 {
+	//Archivation start upon reaching 3 files
+	if len(task.files) == 3 {
 		go m.processTaskArchive(task)
 	}
 
 	return nil
+}
+
+func (m *TaskManager) Shutdown(ctx context.Context) {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    
+    //Making a copy for checking tasks endings
+    done := make(chan struct{})
+    go func() {
+        for m.active > 0 {
+            time.Sleep(100 * time.Millisecond)
+        }
+        close(done)
+    }()
+    
+    //Waiting for timeout
+    select {
+    case <-done:
+        log.Println("All tasks completed successfully")
+    case <-ctx.Done():
+        log.Println("Shutdown timeout, terminating with active tasks")
+    }
+    
+    //State cleanse
+    m.tasks = make(map[string]*Task)
+    m.active = 0
 }
