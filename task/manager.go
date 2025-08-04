@@ -68,7 +68,7 @@ func (m *TaskManager) AddFileToTask(taskID, url string) error {
 	}
 
 	//Extension check
-	if !(strings.HasSuffix(url, ".pdf") || strings.HasSuffix(url, ".jpeg")) {
+	if !(strings.HasSuffix(url, ".pdf") || strings.HasSuffix(url, ".jpeg") || strings.HasSuffix(url, ".jpg")) {
 		return errors.New("unsupported file type")
 	}
 

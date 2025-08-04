@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 
 	"archivezipper/task"
 
@@ -16,7 +18,7 @@ func Init(manager *task.TaskManager) {
 	taskManager = manager
 }
 
-// POST /tasks
+//POST /tasks
 func CreateTaskHandler(w http.ResponseWriter, r *http.Request) {
 	id := uuid.New().String()
 
@@ -33,6 +35,7 @@ type AddRequest struct {
 	URL string `json:"url"`
 }
 
+//GET /tasks/{id}/files
 func AddFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	taskID := vars["id"]
@@ -68,4 +71,36 @@ func GetTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(t)
+}
+
+//GET /tasks/{id}/archive
+func DownloadArchiveHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	taskID := vars["id"]
+
+	t, err := taskManager.GetTask(taskID)
+	if err != nil {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+
+	if t.Status != task.StatusDone || t.ArchiveURL == "" {
+		http.Error(w, "Archive not ready", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"archive.zip\"")
+	http.ServeFile(w, r, t.ArchiveURL)
+
+	fmt.Println("Archive path:", t.ArchiveURL)
+
+if _, err := os.Stat(t.ArchiveURL); err != nil {
+	fmt.Println("Archive file not found:", err)
+	http.Error(w, "Archive file not found", http.StatusNotFound)
+	return
+}
 }
