@@ -5,11 +5,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type TaskStatus string
@@ -41,15 +44,14 @@ type TaskSnapshot struct {
 	ArchiveURL string       `json:"archive_url,omitempty"`
 }
 
-//GetSnapshot returns an immutable snapshot of the task status
+// GetSnapshot returns an immutable snapshot of the task status
 func (t *Task) GetSnapshot() TaskSnapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
-	// Creating files deep copy
+
 	filesCopy := make([]FileResult, len(t.files))
 	copy(filesCopy, t.files)
-	
+
 	return TaskSnapshot{
 		ID:         t.id,
 		Status:     t.status,
@@ -59,82 +61,110 @@ func (t *Task) GetSnapshot() TaskSnapshot {
 }
 
 func (m *TaskManager) processTaskArchive(t *Task) {
-	//Creating a temporary folder
+	logger := logrus.WithField("task_id", t.id)
+
 	tempDir, err := os.MkdirTemp("", "task-"+t.id)
 	if err != nil {
+		logger.WithError(err).Error("failed to create temp dir")
 		m.updateTaskStatus(t, StatusError)
 		return
 	}
+	logger.WithField("temp_dir", tempDir).Info("temp directory created")
 
-	//Parallel file downloading
 	var wg sync.WaitGroup
 	errorCh := make(chan error, len(t.files))
 	fileResults := make([]FileResult, len(t.files))
 
 	for i, fileRes := range t.files {
 		wg.Add(1)
-		go func(index int, url string) {
+		go func(index int, rawURL string) {
 			defer wg.Done()
-			
-			filename := filepath.Base(url)
-			localPath := filepath.Join(tempDir, filename)
-			
-			if err := downloadFileWithRetry(localPath, url, 3); err != nil {
+
+			//Parsing URL
+			u, err := urlpkg.Parse(rawURL)
+			if err != nil {
+				logger.WithField("file_url", rawURL).WithError(err).Warn("invalid URL format")
+				errorCh <- err
+				fileResults[index] = FileResult{URL: rawURL, Success: false, Error: "invalid URL"}
+				return
+			}
+
+			//Extracting and decoding filename
+			name := filepath.Base(u.Path)
+			decoded, err := urlpkg.QueryUnescape(name)
+			if err != nil {
+				logger.WithField("file_url", rawURL).WithError(err).Warn("filename decode failed")
+				errorCh <- err
+				fileResults[index] = FileResult{URL: rawURL, Success: false, Error: "decode error"}
+				return
+			}
+
+			localPath := filepath.Join(tempDir, decoded)
+
+			//Use rawURL instead of undefined "url"
+			if err := downloadFileWithRetry(localPath, rawURL, 3); err != nil {
+				logger.WithError(err).Warn("file download failed")
 				errorCh <- err
 				fileResults[index] = FileResult{
-					URL:     url,
+					URL:     rawURL,
 					Success: false,
 					Error:   err.Error(),
 				}
 				return
 			}
-			
+
+			logger.Info("file downloaded successfully")
 			fileResults[index] = FileResult{
-				URL:     url,
+				URL:     rawURL,
 				Success: true,
 			}
 		}(i, fileRes.URL)
 	}
-	
+
 	wg.Wait()
 	close(errorCh)
-	
-	//Updating file results
+
 	t.mu.Lock()
 	t.files = fileResults
 	t.mu.Unlock()
-	
-	//Checking for errors
+
 	if len(errorCh) > 0 {
+		logger.Warn("some files failed to download")
 		m.updateTaskStatus(t, StatusError)
 		os.RemoveAll(tempDir)
 		return
 	}
-	
-	//Creating an archive
+
 	archivesDir := "./archives"
-	_ = os.MkdirAll(archivesDir, 0755)
-	
+	if err := os.MkdirAll(archivesDir, 0755); err != nil {
+		logger.WithError(err).Error("failed to create archive directory")
+		m.updateTaskStatus(t, StatusError)
+		os.RemoveAll(tempDir)
+		return
+	}
+
 	archivePath := filepath.Join(archivesDir, t.id+".zip")
 	if err := createZipArchive(archivePath, tempDir); err != nil {
+		logger.WithError(err).Error("failed to create zip archive")
 		m.updateTaskStatus(t, StatusError)
 		os.RemoveAll(tempDir)
 		return
 	}
-	
-	//Updating task status
+
+	logger.WithField("archive_path", archivePath).Info("archive created successfully")
+
 	t.mu.Lock()
 	t.archiveURL = archivePath
 	t.status = StatusDone
 	t.mu.Unlock()
-	
-	//Temp dir removal
+
 	os.RemoveAll(tempDir)
-	
-	//Reducing the active task counter
+	logger.Info("temp directory cleaned up")
+
 	m.mu.Lock()
 	m.active--
 	m.mu.Unlock()
+	logger.Info("task completed and resources released")
 }
 
 func (m *TaskManager) updateTaskStatus(t *Task, status TaskStatus) {
@@ -143,22 +173,21 @@ func (m *TaskManager) updateTaskStatus(t *Task, status TaskStatus) {
 	t.status = status
 }
 
-//Extension check
+// isAllowedExtension returns true if the file extension is allowed
 func isAllowedExtension(url string) bool {
 	lower := strings.ToLower(url)
-	return strings.HasSuffix(lower, ".pdf") || 
-	       strings.HasSuffix(lower, ".jpeg") || 
-	       strings.HasSuffix(lower, ".jpg")
+	return strings.HasSuffix(lower, ".pdf") ||
+		strings.HasSuffix(lower, ".jpeg") ||
+		strings.HasSuffix(lower, ".jpg")
 }
 
-//URL file download
 func downloadFile(filepath string, url string) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return errors.New("failed to download file: " + resp.Status)
 	}
@@ -175,7 +204,7 @@ func downloadFile(filepath string, url string) error {
 
 func downloadFileWithRetry(filepath string, url string, maxRetries int) error {
 	var lastError error
-	
+
 	for i := 0; i < maxRetries; i++ {
 		if err := downloadFile(filepath, url); err == nil {
 			return nil
@@ -184,7 +213,7 @@ func downloadFileWithRetry(filepath string, url string, maxRetries int) error {
 			time.Sleep(time.Duration(i*i) * time.Second)
 		}
 	}
-	
+
 	return lastError
 }
 
@@ -202,29 +231,28 @@ func createZipArchive(zipPath string, dir string) error {
 		if err != nil {
 			return err
 		}
-		
+
 		if info.IsDir() {
 			return nil
 		}
-		
+
 		relPath, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
 		}
-		
+
 		file, err := os.Open(path)
 		if err != nil {
 			return err
 		}
 		defer file.Close()
-		
+
 		wr, err := archive.Create(relPath)
 		if err != nil {
 			return err
 		}
-		
+
 		_, err = io.Copy(wr, file)
 		return err
 	})
 }
-

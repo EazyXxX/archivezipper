@@ -5,7 +5,6 @@ import (
 	"archivezipper/handlers"
 	"archivezipper/task"
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 )
 
 func loadConfig(path string) (*config.Config, error) {
@@ -24,55 +24,61 @@ func loadConfig(path string) (*config.Config, error) {
 }
 
 func main() {
-	//Config init
+	//Logger setup
+	logger := logrus.New()
+	logger.Out = os.Stdout
+	logger.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
+	})
+	logger.SetLevel(logrus.InfoLevel)
+
+	//Config loading
 	cfg, err := loadConfig("config.toml")
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		logger.Fatalf("failed to load config: %v", err)
 	}
-	
-	var taskManager = task.NewTaskManager(cfg.Task.MaxConcurrent)
-	//Dependency injection
-	handlers.Init(taskManager)
 
-	//Router initialization
+	//Task manager and Dependency injection
+	manager := task.NewTaskManager(cfg.Task.MaxConcurrent)
+	handlers.Init(manager)
+
+	//Router setup
 	r := mux.NewRouter()
 	r.HandleFunc("/tasks", handlers.CreateTaskHandler).Methods("POST")
 	r.HandleFunc("/tasks/{id}", handlers.GetTaskHandler).Methods("GET")
 	r.HandleFunc("/tasks/{id}/files", handlers.AddFileHandler).Methods("POST")
+	r.HandleFunc("/tasks/{id}/archive", handlers.DownloadArchiveHandler).Methods("GET")
 
-	//Private endpoint for archive loading (used only for task status URL)
-  r.HandleFunc("/tasks/{id}/archive", handlers.DownloadArchiveHandler).Methods("GET")
-
-//HTTP server initialization
-srv := &http.Server{
-	Addr: ":" + cfg.Server.Port,
-	Handler: r,
-}
-
-//Graceful shutdown chanell
-done := make(chan os.Signal, 1)
-signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-go func() {
-	log.Printf("Server started on port %s 🚀 (max tasks: %d)", cfg.Server.Port, cfg.Task.MaxConcurrent)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server error %v", err)
+	//HTTP server setup
+	srv := &http.Server{
+		Addr:    ":" + cfg.Server.Port,
+		Handler: r,
 	}
-}()
 
-//Waiting for the ending signal
-<-done
-log.Println("Server is shutting down")
+	//Server startup in goroutine
+	go func() {
+		logger.WithFields(logrus.Fields{
+			"port":     cfg.Server.Port,
+			"maxTasks": cfg.Task.MaxConcurrent,
+		}).Info("starting server")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("server error: %v", err)
+		}
+	}()
 
-//Graceful shutdown
-ctx, cancel := context.WithTimeout(context.Background(), cfg.Shutdown.Delay)
-defer cancel()
+	//Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	logger.Info("shutdown signal received")
 
-if err := srv.Shutdown(ctx); err != nil {
-	log.Printf("Server shutdown error: %v", err)
-}
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Shutdown.Delay)
+	defer cancel()
 
-taskManager.Shutdown(ctx)
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.WithError(err).Error("server shutdown error")
+	}
 
-log.Println("Server stopped")
+	manager.Shutdown(ctx)
+	logger.Info("server stopped gracefully")
 }
