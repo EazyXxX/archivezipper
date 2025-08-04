@@ -1,4 +1,4 @@
-# Archive-Zipper Service
+# Archive-Zipper
 
 Веб-сервис на Go для скачивания до трёх файлов по URL, упаковки их в ZIP-архив и выдачи пользователю.
 
@@ -19,13 +19,13 @@ cd <project>
 go mod tidy
 ```
 
-3.Запустить сервер:
+3. Запустить сервер:
 
 ```bash
 go run main.go --port=8080 --maxTasks=3 --shutdownDelay=3s
 ```
 
-Или просто воспользоваться командой:
+Или для запуска просто воспользоваться командой:
 
 ```bash
 make dev
@@ -37,9 +37,9 @@ make dev
 - макс. параллельных задач: 3
 - таймаут graceful shutdown: 5s
 
-### Эндпоинты
+## Эндпоинты
 
-1. Создать задачу
+### 1. Создать задачу
    POST /tasks
 
 Успех:
@@ -64,7 +64,7 @@ make dev
 curl -X POST http://localhost:8080/tasks
 ```
 
-2. Добавить файл
+### 2. Добавить файл
 
 ```bash
 POST /tasks/{id}/files
@@ -104,7 +104,7 @@ curl -X POST http://localhost:8080/tasks/<UUID>/files \
   -d '{"url":"https://example.com/file.jpg"}'
 ```
 
-3. Статус задачи
+### 3. Статус задачи
 
 ```bash
 GET /tasks/{id}
@@ -148,48 +148,52 @@ GET /tasks/{id}
 curl http://localhost:8080/tasks/<UUID>
 ```
 
-### Конфигурация и флаги
+## Конфигурация и флаги:
 
---port — порт для HTTP (по умолчанию 8080)
+-- port — порт для HTTP (по умолчанию 8080)
 
---maxTasks — макс. параллельных задач (по умолчанию 3)
+-- maxTasks — макс. параллельных задач (по умолчанию 3)
 
---shutdownDelay — таймаут graceful shutdown (по умолчанию 5s)
+-- shutdownDelay — таймаут graceful shutdown (по умолчанию 5s)
 
-### Используемые практики и паттерны
+## Используемые практики и паттерны:
 
-Dependency Injection
+-- Dependency Injection
 — передача TaskManager в HTTP-handlers через handlers.Init().
 
-Graceful Shutdown
+-- Graceful Shutdown
 — ловля SIGINT/SIGTERM, ожидание завершения активных задач.
 
-Пул задач
+-- Пул задач
 — не более N параллельных задач (maxTasks).
 
-Мьютексы и Snapshot-модель
+-- Мьютексы и Snapshot-модель
 — sync.Mutex для TaskManager и Task; GetSnapshot() возвращает копию без блокировок.
 
-Асинхронная обработка
+-- Асинхронная обработка
 — архивация запускается в отдельной горутине после 3-го файла.
 
-Валидация и ограничение
+-- Валидация и ограничение
 — поддерживаются расширения .pdf, .jpeg, .jpg; до 3 файлов на задачу.
 
-Стандартный ZIP
+-- Стандартный ZIP
 — сборка архива через пакет archive/zip.
 
-Temporary files
+-- Temporary files
 — скачанные файлы во временную папку, готовые ZIP в ./archives.
 
-Логирование
+-- Логирование
 
-- полное логирование происходящего при помощи logrus
+— полное логирование происходящего при помощи logrus
 
 ### Структура проекта
 
 ~/
-main.go # точка входа, DI, флаги, graceful shutdown
-handlers/ # HTTP-handlers, JSON-утилиты
-task/ # бизнес-логика, TaskManager, Task, архивация
-archives/ # готовые ZIP-архивы
+- main.go 
+точка входа, DI, флаги, graceful shutdown
+- handlers/ 
+HTTP-handlers, JSON-утилиты
+- task/ 
+бизнес-логика, TaskManager, Task, архивация
+- archives/ 
+готовые ZIP-архивы
