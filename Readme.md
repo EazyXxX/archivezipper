@@ -40,7 +40,9 @@ make dev
 ## Эндпоинты
 
 ### 1. Создать задачу
-   POST /tasks
+```bash
+POST /tasks
+```
 
 Успех:
 
@@ -74,7 +76,7 @@ POST /tasks/{id}/files
 
 ```json
 {
-  "url": "https://ru.wikipedia.org/wiki/SunOS#/media/%D0%A4%D0%B0%D0%B9%D0%BB:SunOS_4.1.1_P1270750.jpg"
+  "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Sun_white.jpg/800px-Sun_white.jpg"
 }
 ```
 
